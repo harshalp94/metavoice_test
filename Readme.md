@@ -99,6 +99,7 @@ The time taken depends on the machine as well. With CUDA installed the average t
 ## Extensibility
 ````
  1. The reading files can be extended by adding implementation of Apache Kafka, which can make the process near real time, with each file requiring a average of 0.67 seconds to process (Transcription and tokenization)
- 2. Using Dask/Spark to process the file in distributed manner to make the processing faster. 
- 3. Using Dask partition to partition the parquet file, instead of manually creating partitions in the S3 bucket.
+ 2. Use of containerization to spawn multiple pods and process multiple folders sequentially instead of processing files.
+ 3. Using Dask/Spark to process the file in distributed manner to make the processing faster. 
+ 4. Using Dask partition to partition the parquet file, instead of manually creating partitions in the S3 bucket.
 ````
