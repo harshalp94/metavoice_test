@@ -1,0 +1,6 @@
+boto3==1.28.62
+librosa==0.10.1
+numpy==1.25.0
+openai-whisper==20230918
+pandas==1.5.3
+torch==2.1.0+cu118
