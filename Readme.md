@@ -3,25 +3,14 @@
 <!-- TOC -->
 * [Metavoice Test](#metavoice-test)
   * [Reading of files.](#reading-of-files-)
-      * [1. Access Key](#1-access-key)
-      * [2. Secret Key](#2-secret-key)
-      * [3. Region](#3-region)
-      * [4. File format](#4-file-format)
     * [S3 File reader](#s3-file-reader)
   * [Processing](#processing)
     * [flac_transformer](#flactransformer)
       * [1. Transcription](#1-transcription)
       * [2. Tokenization](#2-tokenization)
   * [Storage](#storage)
-      * [1. folder_name: This contains the folder name (p225)](#1-foldername-this-contains-the-folder-name-p225)
-      * [2. file_name: Relative path of the file in the S3 bucket](#2-filename-relative-path-of-the-file-in-the-s3-bucket)
-      * [3. Transcription: Transcribed text of the file](#3-transcription-transcribed-text-of-the-file)
-      * [4. Token: Tokenized representation of the audio file](#4-token-tokenized-representation-of-the-audio-file)
   * [Performance](#performance)
   * [Extensibility](#extensibility)
-      * [1. The reading files can be extended by adding implementation of Apache Kafka, which can make the process near real time, with each file requiring a average of 0.67 seconds to process (Transcription and tokenization)](#1-the-reading-files-can-be-extended-by-adding-implementation-of-apache-kafka-which-can-make-the-process-near-real-time-with-each-file-requiring-a-average-of-067-seconds-to-process-transcription-and-tokenization)
-      * [2. Using Dask/Spark to process the file in distributed manner to make the processing faster.](#2-using-daskspark-to-process-the-file-in-distributed-manner-to-make-the-processing-faster-)
-      * [3. Using Dask partition to partition the parquet file, instead of manually creating partitions in the S3 bucket.](#3-using-dask-partition-to-partition-the-parquet-file-instead-of-manually-creating-partitions-in-the-s3-bucket)
 <!-- TOC -->
 
 
@@ -92,13 +81,17 @@ The file is written once all files are processed and a list of dictionaries has 
 ````
 The output file is named data.parquet and is stored in each folder. Folder creation is currently hardcoded in the main file, with the path format: s3://{bucket_name}/output/{partition_name}/data.parquet.
 ## Performance
+The application generates two logs, 
+1. application.log - Application logs
+2. timing.log - stores time required to process each file, average time per file and total time
+
 The time taken to transcribe, and tokenize the 11756 files in 7864.04 seconds, the average file processing time being 0.67 seconds.
 The time taken depends on the machine as well. With CUDA installed the average time taken in 0.67 seconds and without CUDA installed the time taken on average is around 60 seconds. 
 
 
 ## Extensibility
 ````
- 1. The reading files can be extended by adding implementation of Apache Kafka, which can make the process near real time, with each file requiring a average of 0.67 seconds to process (Transcription and tokenization)
+ 1. The reading files can be extended by adding implementation of Apache Kafka, which can make the process of reading files distributed.
  2. Use of containerization to spawn multiple pods and process multiple folders sequentially instead of processing files.
  3. Using Dask/Spark to process the file in distributed manner to make the processing faster. 
  4. Using Dask partition to partition the parquet file, instead of manually creating partitions in the S3 bucket.
