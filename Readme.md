@@ -37,8 +37,8 @@ For reading the files from the S3 bucket, I have created an interface file_manag
 
 For this task, I am listing the files from the S3 bucket, putting them in a list, and then using a generator, I take a single name, download that file to a temporary location using the python library tempfile, which keeps the file in the temp location till my processing is complete. Once the processing is complete, the temp file is deleted.
 
-This helps me keep a single file in memory while processing. The processing can be further enhanced by using a streaming service like Apache Kafka/RabbitMQ or any other message queue to distribute the reading file. 
-If we use a message queue service, we can distribute the reading and processing parts among several nodes.
+This helps me keep a single file in memory while processing. The processing can be further enhanced using a streaming service like Apache Kafka/RabbitMQ or any other message queue to distribute the reading file. 
+We can distribute the reading and processing parts among several nodes using a message queue service.
 
 
 ```mermaid
