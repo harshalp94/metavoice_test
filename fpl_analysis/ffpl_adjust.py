@@ -156,8 +156,9 @@ def main() -> None:
     p = p.sort_values("ffpl_pgw", ascending=False)
     keep = ["web_name", "short_name", "position", "exp_tier", "eff_mult",
             "proj_pgw", "ffpl_pgw", "ffpl_season", "p_tier1", "p_tier2",
-            "p_tier3", "exp_mins_gw", "starts", "likely_starter", "status",
-            "flags"]
+            "p_tier3", "exp_mins_gw", "starts", "likely_starter",
+            "penalties_order", "direct_freekicks_order",
+            "corners_and_indirect_freekicks_order", "status", "flags"]
     p[keep].round(3).to_csv(args.out_dir / "ffpl_projections.csv", index=False)
 
     clubs_out = clubs.sort_values("strength_z", ascending=False)
