@@ -146,10 +146,18 @@ def main() -> None:
     p["eff_mult"] = p.ffpl_pgw / p.proj_pgw
     p["ffpl_season"] = p.ffpl_pgw * SCORED_GWS
 
+    # A "likely starter" started 27+ of 38 league matches last season, is
+    # currently available, and (for keepers) is priced as the club's #1.
+    flags_str = p["flags"].fillna("")
+    p["likely_starter"] = ((p.status == "a")
+                           & (p.starts >= 27)
+                           & ~flags_str.str.contains("GK-RISK"))
+
     p = p.sort_values("ffpl_pgw", ascending=False)
     keep = ["web_name", "short_name", "position", "exp_tier", "eff_mult",
             "proj_pgw", "ffpl_pgw", "ffpl_season", "p_tier1", "p_tier2",
-            "p_tier3", "exp_mins_gw", "status", "flags"]
+            "p_tier3", "exp_mins_gw", "starts", "likely_starter", "status",
+            "flags"]
     p[keep].round(3).to_csv(args.out_dir / "ffpl_projections.csv", index=False)
 
     clubs_out = clubs.sort_values("strength_z", ascending=False)
@@ -161,12 +169,25 @@ def main() -> None:
               f"P {r.p_tier1:.2f}/{r.p_tier2:.2f}/{r.p_tier3:.2f}  "
               f"mult_attack {r.mult_attack:.3f}")
 
-    listed = p[p.status.isin(["a", "d"])]
-    print("\nFFPL top 20 (tier-adjusted expected points per gameweek):")
+    listed = p[p.likely_starter]
+    print("\nFFPL top 20, likely starters only "
+          "(tier-adjusted expected points per gameweek):")
     for i, r in enumerate(listed.head(20).itertuples(), 1):
         print(f"  {i:2d}. {r.web_name:<16} {r.short_name}  {r.position:<3} "
               f"base {r.proj_pgw:.2f} x {r.eff_mult:.2f} = {r.ffpl_pgw:.2f} "
-              f"/GW  (~{r.ffpl_season:.0f} over GW3-38)  {r.flags if isinstance(r.flags, str) else ''}")
+              f"/GW  (~{r.ffpl_season:.0f} over GW3-38)  starts {r.starts}  "
+              f"{r.flags if isinstance(r.flags, str) else ''}")
+
+    dropped = p[~p.likely_starter].head(40)
+    dropped = dropped[dropped.ffpl_pgw >= listed.ffpl_pgw.iloc[19]]
+    if len(dropped):
+        print("\nExcluded by the starter filter despite top-20 points:")
+        for r in dropped.itertuples():
+            reason = ("injury/unavailable" if r.status != "a"
+                      else "keeper competition" if isinstance(r.flags, str)
+                      and "GK-RISK" in r.flags
+                      else f"only {r.starts} starts last season")
+            print(f"      {r.web_name} {r.short_name} {r.ffpl_pgw:.2f} - {reason}")
 
 
 if __name__ == "__main__":

@@ -431,7 +431,8 @@ def main() -> None:
 
     export_cols = [
         "web_name", "short_name", "position", "price", "proj_pgw",
-        "proj_season", "proj_next6_pgw", "value", "exp_mins_gw", "attack_pts",
+        "proj_season", "proj_next6_pgw", "value", "exp_mins_gw", "starts",
+        "attack_pts",
         "cs_pts", "defcon_pts", "save_pts", "bonus_pts", "appearance_pts",
         "conceded_pts", "card_pts", "xg90", "xa90", "dc90", "cs_prob",
         "fdr_next6", "selected_by_percent", "status", "flags"]
