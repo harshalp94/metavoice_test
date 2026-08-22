@@ -39,12 +39,27 @@ every model component is in
    budget, 2 GK / 5 DEF / 5 MID / 3 FWD, max 3 per club and legal
    formations. A second run anchors the premium captaincy option.
 
+## FFPL variant (club-tier multipliers)
+
+`ffpl_adjust.py` re-ranks the same projections under the
+[FFPL rules](https://www.ffpl.site/rules), which score official FPL points
+scaled by a club-tier multiplier (table positions 1-6 / 7-14 / 15-20, recut
+every gameweek; ×1.4 facing two bands up through ×0.7 facing two bands
+down). It estimates each club's expected tier from last season's league
+table blended with this season's market strength ratings, Monte-Carlos the
+table to get tier probabilities, and weights each opponent by how much a
+player actually produces in that kind of match (attacking output shrinks
+against stronger opponents, defensive volume grows). Outputs
+`output/ffpl_projections.csv` and `output/ffpl_club_tiers.csv`, and prints
+the tier-adjusted top 20 — the ranked auction priority list FFPL requires.
+
 ## Run it
 
 ```bash
 pip install -r requirements.txt
 python fetch_data.py   # refresh data/ (optional; a snapshot is committed)
 python analyze.py      # writes output/REPORT.md and the CSVs
+python ffpl_adjust.py  # FFPL tier-adjusted rankings on top of the above
 ```
 
 Snapshot committed here: pre-season 2026-27 prices and availability as of

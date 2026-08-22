@@ -24,6 +24,7 @@ FILES = {
     f"{CURRENT_SEASON}/fixtures.csv": "current_fixtures.csv",
     f"{PREVIOUS_SEASON}/players_raw.csv": "previous_players_raw.csv",
     f"{PREVIOUS_SEASON}/teams.csv": "previous_teams.csv",
+    f"{PREVIOUS_SEASON}/fixtures.csv": "previous_fixtures.csv",
 }
 
 

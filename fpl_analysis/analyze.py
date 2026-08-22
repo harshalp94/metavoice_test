@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 POS_NAME = {1: "GK", 2: "DEF", 3: "MID", 4: "FWD"}
-GOAL_PTS = {1: 6, 2: 6, 3: 5, 4: 4}
+GOAL_PTS = {1: 10, 2: 6, 3: 5, 4: 4}
 CS_PTS = {1: 4, 2: 4, 3: 1, 4: 0}
 DEFCON_THRESHOLD = {2: 10, 3: 12, 4: 12}  # per-match CBIT / CBIRT threshold
 
