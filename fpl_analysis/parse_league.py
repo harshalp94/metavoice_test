@@ -79,7 +79,7 @@ def main() -> None:
 
     board = (free.dropna(subset=["ffpl_pgw"])
              .sort_values("ffpl_pgw", ascending=False))
-    cols = ["name", "clubCode", "position_x", "tierLabel", "ffpl_pgw",
+    cols = ["name", "clubCode", "position_x", "tierLabel", "code", "ffpl_pgw",
             "ffpl_season", "season_points", "likely_starter", "starts",
             "penalties_order", "direct_freekicks_order",
             "corners_and_indirect_freekicks_order", "status", "flags"]
