@@ -27,6 +27,7 @@ from ffpl_adjust import LADDER, TIER_MULT, COMPONENT_LADDER
 # (player name, club code) -> (factor, note)
 OVERRIDES = {
     ("Senesi", "TOT"): (0.85, "benched in GW2 per manager report - check team news"),
+    ("Mateta", "CRY"): (0.30, "out ~4 weeks per manager report - misses most of GW3-8"),
 }
 
 
@@ -74,6 +75,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", default="data", type=pathlib.Path)
     parser.add_argument("--out-dir", default="output", type=pathlib.Path)
+    parser.add_argument("--top", default=22, type=int)
+    parser.add_argument("--exclude-clubs", nargs="*", default=[],
+                        help="club codes to leave out of the printed board")
     args = parser.parse_args()
 
     free = pd.read_csv(args.out_dir / "ffpl_free_agents.csv")
@@ -111,14 +115,16 @@ def main() -> None:
     board[keep].round(2).to_csv(args.out_dir / "ffpl_draft_now.csv",
                                 index=False)
 
-    starters = board[board.likely_starter & (board.status == "a")]
+    listed = board[(board.status == "a")
+                   & ~board.clubCode.isin(args.exclude_clubs)]
     print("Draft-now board (free agents, next-6-gameweek score):")
-    for i, r in enumerate(starters.head(22).itertuples(), 1):
+    for i, r in enumerate(listed.head(args.top).itertuples(), 1):
         note = r.role_note or (r.flags if isinstance(r.flags, str) else "")
+        starter = "" if r.likely_starter else "not nailed; "
         print(f"  {i:2d}. {r.name:<16} {r.clubCode} {r.position:<3} "
               f"T{int(r.tierLabel)}  season {r.ffpl_pgw:.2f}  "
               f"next6 {r.next6_pgw:.2f}  role {r.role:.2f}  "
-              f"-> {r.draft_now:.2f}  {note}")
+              f"-> {r.draft_now:.2f}  {starter}{note}")
 
 
 if __name__ == "__main__":
