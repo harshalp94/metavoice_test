@@ -30,6 +30,12 @@ OVERRIDES = {
     ("Mateta", "CRY"): (0.30, "out ~4 weeks per manager report - misses most of GW3-8"),
 }
 
+# Players who left the league after the snapshots were taken
+# (manager reports): removed from the board entirely.
+DEPARTED = {
+    ("Woltemade", "NEW"),  # joined Juventus
+}
+
 
 def role_factors(data_dir: pathlib.Path) -> dict:
     gw = pd.read_csv(data_dir / "merged_gw.csv")
@@ -93,7 +99,9 @@ def main() -> None:
 
     comps = proj[["code", "short_name", "xg90", "xa90", "dc90", "cs_prob",
                   "exp_mins_gw"] + list(COMPONENT_LADDER)].copy()
-    board = free.dropna(subset=["code"]).merge(comps, on="code", how="left")
+    gone = free.apply(lambda r: (r["name"], r.clubCode) in DEPARTED, axis=1)
+    board = free[~gone].dropna(subset=["code"]).merge(comps, on="code",
+                                                      how="left")
     board = board.merge(mults, left_on="clubCode", right_on="short_name",
                         how="left")
 
