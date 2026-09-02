@@ -98,7 +98,7 @@ def main() -> None:
             news = r.news if isinstance(r.news, str) else "unavailable"
             notes.append(f"{r.web_name}: {news}")
         nodata = raw[(raw.club == club) & (raw.status == "a")
-                     & (raw.minutes < 600) & (raw.now_cost >= 60)]
+                     & ~raw.code.isin(set(proj.code)) & (raw.now_cost >= 60)]
         if len(nodata):
             notes.append("No PL data (market-priced starters): "
                          + ", ".join(nodata.web_name) + ".")

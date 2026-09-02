@@ -45,10 +45,10 @@ POS_NAME = {1: "GK", 2: "DEF", 3: "MID", 4: "FWD"}
 
 
 def proxy_players(data_dir: pathlib.Path, pool: pd.DataFrame,
-                  clubs: pd.DataFrame) -> pd.DataFrame:
+                  clubs: pd.DataFrame, modelled_codes) -> pd.DataFrame:
     raw = pd.read_csv(data_dir / "current_players_raw.csv")
     teams = pd.read_csv(data_dir / "current_teams.csv")
-    unmodelled = raw[(raw.status == "a") & (raw.minutes < 600)
+    unmodelled = raw[(raw.status == "a") & ~raw.code.isin(modelled_codes)
                      & (raw.now_cost >= PROXY_MIN_PRICE * 10)].copy()
     unmodelled["position"] = unmodelled.element_type.map(POS_NAME)
     unmodelled["short_name"] = unmodelled.team.map(
@@ -106,7 +106,7 @@ def main() -> None:
     pool = proj[proj.likely_starter].reset_index(drop=True)
     available = pd.concat([
         proj[proj.status == "a"][["position", "ffpl_pgw"]],
-        proxy_players(args.data_dir, pool, clubs),
+        proxy_players(args.data_dir, pool, clubs, set(proj.code)),
     ], ignore_index=True)
 
     out = pool[["web_name", "short_name", "position", "ffpl_pgw",

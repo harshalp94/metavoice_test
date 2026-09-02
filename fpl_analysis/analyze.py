@@ -130,11 +130,30 @@ def shrunk_rate(raw_per90: pd.Series, minutes: pd.Series,
     return (minutes * raw_per90 + SHRINK_K * prior) / (minutes + SHRINK_K)
 
 
+PERF_COLS = [
+    "minutes", "starts", "goals_scored", "assists", "expected_goals",
+    "expected_assists", "defensive_contribution", "saves", "bonus",
+    "yellow_cards", "red_cards"]
+
+
 def build_projections(d: dict) -> pd.DataFrame:
     ctx = team_context(d)
     p = d["players"].copy()
     p["position"] = p.element_type.map(POS_NAME)
     p["price"] = p.now_cost / 10
+
+    # Once the season starts, the live file's performance columns hold only
+    # the current season's few gameweeks. Rates must come from the full
+    # previous season, joined on the permanent player code; the live file
+    # keeps supplying identity, price, club, status and set-piece duties.
+    # Before kickoff both files carry identical last-season numbers, so the
+    # overwrite is a no-op then.
+    p["season_points"] = p.total_points  # current-season points, for reference
+    prev_perf = d["prev_players"][["code"] + PERF_COLS].rename(
+        columns={c: f"{c}_lastseason" for c in PERF_COLS})
+    p = p.merge(prev_perf, on="code", how="left")
+    for c in PERF_COLS:
+        p[c] = p[f"{c}_lastseason"].fillna(0)
     p = p.merge(ctx[["id", "short_name", "cs_prob", "xgc90",
                      "fdr_next6", "fixture_mult"]],
                 left_on="team", right_on="id", how="left",
@@ -291,9 +310,11 @@ def optimize_squad(modelled: pd.DataFrame, force_codes=()):
 
 def watchlist(d: dict) -> pd.DataFrame:
     """Players the model cannot score: no meaningful PL minutes last season."""
-    p = d["players"]
+    p = d["players"].copy()
     teams = dict(zip(d["teams"].id, d["teams"].short_name))
-    w = p[(p.minutes < MIN_MINUTES) & (p.status == "a")
+    last_minutes = dict(zip(d["prev_players"].code, d["prev_players"].minutes))
+    p["minutes_lastseason"] = p.code.map(last_minutes).fillna(0)
+    w = p[(p.minutes_lastseason < MIN_MINUTES) & (p.status == "a")
           & ((p.now_cost >= 60) | (p.penalties_order == 1))].copy()
     w["club"] = w.team.map(teams)
     w["price"] = w.now_cost / 10
@@ -430,7 +451,8 @@ def main() -> None:
     modelled = build_projections(d)
 
     export_cols = [
-        "web_name", "short_name", "position", "price", "proj_pgw",
+        "code", "web_name", "short_name", "position", "price", "season_points",
+        "proj_pgw",
         "proj_season", "proj_next6_pgw", "value", "exp_mins_gw", "starts",
         "penalties_order", "direct_freekicks_order",
         "corners_and_indirect_freekicks_order",

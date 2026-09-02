@@ -154,7 +154,8 @@ def main() -> None:
                            & ~flags_str.str.contains("GK-RISK"))
 
     p = p.sort_values("ffpl_pgw", ascending=False)
-    keep = ["web_name", "short_name", "position", "exp_tier", "eff_mult",
+    keep = ["code", "web_name", "short_name", "position", "season_points",
+            "exp_tier", "eff_mult",
             "proj_pgw", "ffpl_pgw", "ffpl_season", "p_tier1", "p_tier2",
             "p_tier3", "exp_mins_gw", "starts", "likely_starter",
             "penalties_order", "direct_freekicks_order",

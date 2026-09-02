@@ -62,5 +62,8 @@ python analyze.py      # writes output/REPORT.md and the CSVs
 python ffpl_adjust.py  # FFPL tier-adjusted rankings on top of the above
 ```
 
-Snapshot committed here: pre-season 2026-27 prices and availability as of
-2026-08-21, the day of the gameweek 1 kickoff.
+Snapshot committed here: 2026-27 prices, clubs and availability as of
+2026-09-02 — gameweek 1 played, transfer window closed. Once the season is
+under way the live file's stat columns hold only the current season, so
+`analyze.py` takes all performance rates from the previous-season file,
+joined on the permanent player code.

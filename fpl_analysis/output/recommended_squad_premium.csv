@@ -1,16 +1,16 @@
 web_name,short_name,position,price,proj_pgw,starter,flags
 Raya,ARS,GK,6.0,4.77,True,
-Virgil,LIV,DEF,6.5,4.99,True,
-Guéhi,MCI,DEF,6.0,4.9,True,
-Senesi,TOT,DEF,6.0,4.84,True,NEW-CLUB
-Tarkowski,EVE,DEF,6.0,4.68,True,
-Thiaw,NEW,DEF,5.0,4.38,True,
-Anderson,MCI,MID,6.5,5.01,True,NEW-CLUB
-Rice,ARS,MID,7.5,4.69,True,
+Virgil,LIV,DEF,6.5,4.98,True,
+Guéhi,MCI,DEF,6.0,4.89,True,
+Senesi,TOT,DEF,6.0,4.83,True,NEW-CLUB
+Thiaw,NEW,DEF,5.0,4.37,True,
+Anderson,MCI,MID,6.4,5.01,True,NEW-CLUB
+Rice,ARS,MID,7.5,4.68,True,
 Enzo,CHE,MID,7.0,4.65,True,
+Garner,EVE,MID,6.0,4.54,True,
 Haaland,MCI,FWD,15.5,5.86,True,PEN
 Thiago,BRE,FWD,8.0,5.13,True,PEN
 Dubravka,TOT,GK,4.0,4.03,False,"NEW-CLUB, GK-RISK"
-Yarmoliuk,BRE,MID,5.0,3.18,False,
-Berge,FUL,MID,5.0,3.05,False,
+Konsa,ARS,DEF,4.5,4.13,False,NEW-CLUB
+Ampadu,LEE,MID,5.5,4.01,False,
 Calvert-Lewin,LEE,FWD,6.0,4.08,False,PEN
