@@ -58,9 +58,11 @@ def club_multipliers(data_dir: pathlib.Path, tier_of: dict) -> pd.DataFrame:
         opponents.setdefault(a, []).append(h)
 
     rows = []
+    gap_lists = {}
     for club, opps in opponents.items():
         gaps = [max(-2, min(2, tier_of.get(club, 2) - tier_of.get(o, 2)))
                 for o in opps]
+        gap_lists[club] = gaps
         row = {"short_name": club, "n_fixtures": len(gaps)}
         for key, ladder in LADDER.items():
             w = [ladder[g] for g in gaps]
@@ -68,7 +70,7 @@ def club_multipliers(data_dir: pathlib.Path, tier_of: dict) -> pd.DataFrame:
             row[f"mult_{key}"] = (sum(wi * mi for wi, mi in zip(w, m))
                                   / sum(w))
         rows.append(row)
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows), gap_lists
 
 
 def main() -> None:
@@ -87,9 +89,10 @@ def main() -> None:
     tier_of = (league.dropna(subset=["tierLabel"])
                .groupby("clubCode").tierLabel.agg(lambda s: int(s.iloc[0]))
                .to_dict())
-    mults = club_multipliers(args.data_dir, tier_of)
+    mults, gap_lists = club_multipliers(args.data_dir, tier_of)
 
-    comps = proj[["code", "short_name"] + list(COMPONENT_LADDER)].copy()
+    comps = proj[["code", "short_name", "xg90", "xa90", "dc90", "cs_prob",
+                  "exp_mins_gw"] + list(COMPONENT_LADDER)].copy()
     board = free.dropna(subset=["code"]).merge(comps, on="code", how="left")
     board = board.merge(mults, left_on="clubCode", right_on="short_name",
                         how="left")
@@ -97,6 +100,15 @@ def main() -> None:
     board["next6_pgw"] = sum(
         board[comp] * board[f"mult_{ladder}"]
         for comp, ladder in COMPONENT_LADDER.items())
+
+    # Pure-expected variant: the attacking component from xG/xA rates only
+    # (the default already blends 60% expected / 40% actual; this view drops
+    # actual returns entirely, so finishing luck cannot flatter anyone).
+    goal_pts = board.position.map({"GK": 10, "DEF": 6, "MID": 5, "FWD": 4})
+    board["xgi90"] = board.xg90 + board.xa90
+    pure_x_attack = ((board.xg90 * goal_pts + board.xa90 * 3)
+                     * board.exp_mins_gw / 90)
+    board["x_adjust"] = (pure_x_attack - board.attack_pts) * board.mult_attack
 
     roles = role_factors(args.data_dir)
     board["role"] = board.code.map(roles).fillna(0.75)
@@ -107,24 +119,44 @@ def main() -> None:
         board.loc[hit, "role_note"] = note
 
     board["draft_now"] = board.next6_pgw * board.role
-    board = board.sort_values("draft_now", ascending=False)
+    board["draft_x"] = board.draft_now + board.x_adjust * board.role
 
-    keep = ["name", "clubCode", "position", "tierLabel", "ffpl_pgw",
-            "next6_pgw", "role", "draft_now", "season_points", "status",
-            "flags", "role_note"]
+    # Potential impact: the spike week - expected points in the club's
+    # single most favorable fixture of the window, where the tier
+    # multiplier (and the matching output ratio) peaks.
+    def spike(r):
+        gaps = gap_lists.get(r.clubCode)
+        if not gaps or r.ffpl_pgw != r.ffpl_pgw:
+            return 0.0
+        best = 0.0
+        for g in gaps:
+            total = sum(getattr(r, comp) * LADDER[ladder][g] * TIER_MULT[g]
+                        for comp, ladder in COMPONENT_LADDER.items())
+            best = max(best, total)
+        return best
+
+    board["spike_gw"] = [spike(r) for r in board.itertuples()]
+    # Final ranking: 70% steady xG-based value, 30% ceiling.
+    board["impact"] = 0.7 * board.draft_x + 0.3 * board.spike_gw * board.role
+    board = board.sort_values("impact", ascending=False)
+
+    keep = ["name", "clubCode", "position", "tierLabel", "xg90", "xa90",
+            "xgi90", "dc90", "cs_prob", "ffpl_pgw", "next6_pgw", "role",
+            "draft_now", "draft_x", "spike_gw", "impact", "season_points",
+            "status", "flags", "role_note"]
     board[keep].round(2).to_csv(args.out_dir / "ffpl_draft_now.csv",
                                 index=False)
 
     listed = board[(board.status == "a")
                    & ~board.clubCode.isin(args.exclude_clubs)]
-    print("Draft-now board (free agents, next-6-gameweek score):")
+    print("Draft board ranked by impact (0.7 x steady xG value + 0.3 x spike week):")
     for i, r in enumerate(listed.head(args.top).itertuples(), 1):
         note = r.role_note or (r.flags if isinstance(r.flags, str) else "")
         starter = "" if r.likely_starter else "not nailed; "
         print(f"  {i:2d}. {r.name:<16} {r.clubCode} {r.position:<3} "
-              f"T{int(r.tierLabel)}  season {r.ffpl_pgw:.2f}  "
-              f"next6 {r.next6_pgw:.2f}  role {r.role:.2f}  "
-              f"-> {r.draft_now:.2f}  {starter}{note}")
+              f"T{int(r.tierLabel)}  xGI90 {r.xgi90:.2f}  dc90 {r.dc90:4.1f}  "
+              f"CS {r.cs_prob:.0%}  xG {r.draft_x:.2f}  spike {r.spike_gw:.2f}  "
+              f"impact {r.impact:.2f}  {starter}{note}")
 
 
 if __name__ == "__main__":
