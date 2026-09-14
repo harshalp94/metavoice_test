@@ -9,6 +9,7 @@
       * [1. Transcription](#1-transcription)
       * [2. Tokenization](#2-tokenization)
   * [Storage](#storage)
+    * [Version store](#version-store)
   * [Performance](#performance)
   * [Extensibility](#extensibility)
 <!-- TOC -->
@@ -80,6 +81,28 @@ Once all files are processed, the file is written, and a list of dictionaries ha
  4. Token: Tokenized representation of the audio file
 ````
 The output file is named data.parquet and is stored in each folder. Folder creation is currently hardcoded in the main file, with the path format: s3://{bucket_name}/output/{partition_name}/data.parquet.
+### Version store
+Writing directly to output/ overwrites the previous run. storage_util/version_store.py adds a VersionStore that turns every write into a new immutable version instead, with a manifest tracking metadata and a latest pointer:
+````
+{destination}/manifest.json                              -> version metadata + latest pointer
+{destination}/v1/data.parquet                            -> unpartitioned version
+{destination}/v2/{partition_column}={value}/data.parquet -> partitioned version
+````
+It supports the same two storage options as partition_storage ('s3' and 'local') and uses the same AWS profile/endpoint configuration. Usage:
+````python
+from storage_util.version_store import VersionStore
+
+store = VersionStore(destination='output', storage='s3', bucket_name=BUCKET_NAME,
+                     profile_name='r2', endpoint_url=ENDPOINT_URL)
+
+version = store.write(data_structures, partition_column='folder_name', note='full pipeline run')
+df = store.read()        # latest version
+df_v1 = store.read(1)    # a specific version
+store.list_versions()    # metadata of every version (rows, created_at, note, files)
+store.rollback(1)        # point latest back to v1, keeping the newer data
+store.delete_version(2)  # remove a non-latest version's data and metadata
+````
+The manifest is written after the data files, so an interrupted write never leaves a visible half-written version, and version numbers are never reused after a delete. Unit tests live in test_version_store.py and run against a temporary local directory and an in-memory S3 fake, so they need no credentials.
 ## Performance
 The application generates two logs, 
 1. application.log - Application logs
