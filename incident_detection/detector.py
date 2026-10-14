@@ -1,42 +1,68 @@
 """Sliding-window incident detection for merchant transaction logs.
 
-How the functions fit together, per log record, inside detect_incidents:
+detect_incidents runs three steps for every log record:
+    1. Reading              read_logs     -> (timestamp, merchant_id, status_code, count)
+    2. Processing           add_to_window -> that merchant's status-code counts for the last 30s
+    3. Incident resolution  update_alerts -> TRIGGER / RESOLVE events for that merchant
 
-    split_logs(logs)            -> one record string per line
-    parse_log(line)             -> (timestamp, merchant_id, status_code, count)
-    add_to_window(...)          -> update that merchant's 30s window counts, evict old records
-    evaluate_alerts(...)        -> apply trigger/resolve rules to the merchant's codes
-                                   (rules are built from volume_rule, impact_rule,
-                                   all_of, any_of, negate)
-    format_event(event)         -> "timestamp,event_type,merchant_id,status_code", after sorting
-
-For manual debugging, run(logs) prints every step, and running this file
-directly (`python3 incident_detection/detector.py [file | -]`) traces the
-samples, or the logs in a file / on stdin.
+For manual debugging: python3 incident_detection/detector.py [file | -]
 """
-import re
 import sys
 from collections import defaultdict, deque
 
 WINDOW_SECONDS = 30
-SUCCESS_STATUS = 200
-TRIGGER = "TRIGGER"
-RESOLVE = "RESOLVE"
+MIN_FAILURES = 5
+MIN_IMPACT_PERCENT = 1
+SUCCESS = 200
 
 
-# Parsing and formatting
+# 1. Reading
 
-def split_logs(logs):
-    """Accept one string with a record per line, or a list of records; skip blank lines."""
-    if isinstance(logs, str):
-        logs = logs.splitlines()
-    return [line for line in logs if line.strip()]
+def read_logs(logs):
+    """Turn a multi-line string (or list of lines) into (timestamp, merchant_id, status_code, count) records."""
+    lines = logs.splitlines() if isinstance(logs, str) else logs
+    records = []
+    for line in lines:
+        if line.strip():
+            timestamp, merchant_id, status_code, count = line.replace(",", " ").split()
+            records.append((int(timestamp), merchant_id, int(status_code), int(count)))
+    return records
 
 
-def parse_log(line):
-    """Parse a "timestamp, merchant_id, status_code, count" record (comma and/or space separated)."""
-    timestamp, merchant_id, status_code, count = re.split(r"[,\s]+", line.strip())
-    return int(timestamp), merchant_id, int(status_code), int(count)
+# 2. Processing
+
+def add_to_window(window, counts, record):
+    """Add a record to its merchant's window and drop records outside [T-29, T]."""
+    timestamp, _, status_code, count = record
+    window.append(record)
+    counts[status_code] += count
+    while window[0][0] <= timestamp - WINDOW_SECONDS:
+        _, _, old_code, old_count = window.popleft()
+        counts[old_code] -= old_count
+
+
+# 3. Incident resolution
+
+def is_incident(counts, status_code):
+    """At least MIN_FAILURES failures that are more than MIN_IMPACT_PERCENT% of the successes."""
+    failures = counts.get(status_code, 0)
+    return failures >= MIN_FAILURES and failures * 100 > counts.get(SUCCESS, 0) * MIN_IMPACT_PERCENT
+
+
+def update_alerts(counts, active, timestamp, merchant_id):
+    """Trigger or resolve the merchant's alerts; return the new events."""
+    events = []
+    for status_code in counts:
+        if status_code == SUCCESS:
+            continue
+        incident = is_incident(counts, status_code)
+        if incident and status_code not in active:
+            active.add(status_code)
+            events.append((timestamp, merchant_id, status_code, "TRIGGER"))
+        elif not incident and status_code in active:
+            active.remove(status_code)
+            events.append((timestamp, merchant_id, status_code, "RESOLVE"))
+    return events
 
 
 def format_event(event):
@@ -44,103 +70,21 @@ def format_event(event):
     return f"{timestamp},{event_type},{merchant_id},{status_code}"
 
 
-# Sliding window
-
-def add_to_window(window, counts, timestamp, status_code, count, window_seconds=WINDOW_SECONDS):
-    """Add a record to a merchant's window, keeping only [T - window_seconds + 1, T].
-
-    `window` is a deque of (timestamp, status_code, count) records and `counts`
-    maps status code to its total in the window.
-    """
-    window.append((timestamp, status_code, count))
-    counts[status_code] += count
-    while window[0][0] <= timestamp - window_seconds:
-        _, old_code, old_count = window.popleft()
-        counts[old_code] -= old_count
-        if counts[old_code] == 0:
-            del counts[old_code]
-
-
-# Alert rules: functions (counts, status_code) -> bool over a merchant's window counts.
-
-def volume_rule(min_failures):
-    """At least `min_failures` occurrences of the status code."""
-    return lambda counts, status_code: counts.get(status_code, 0) >= min_failures
-
-
-def impact_rule(percent):
-    """Failures are more than `percent`% of the merchant's successful volume."""
-    return lambda counts, status_code: (
-        counts.get(status_code, 0) * 100 > counts.get(SUCCESS_STATUS, 0) * percent
-    )
-
-
-def all_of(*rules):
-    return lambda counts, status_code: all(rule(counts, status_code) for rule in rules)
-
-
-def any_of(*rules):
-    return lambda counts, status_code: any(rule(counts, status_code) for rule in rules)
-
-
-def negate(rule):
-    return lambda counts, status_code: not rule(counts, status_code)
-
-
-DEFAULT_TRIGGER_RULE = all_of(volume_rule(5), impact_rule(1))
-
-
-# Alert evaluation
-
-def evaluate_alerts(counts, active, trigger_rule, resolve_rule):
-    """Update a merchant's `active` alert codes; return the (status_code, event_type) changes."""
-    changes = []
-    failure_codes = {code for code in counts if code != SUCCESS_STATUS}
-    for code in failure_codes | active:
-        if code in active:
-            if resolve_rule(counts, code):
-                active.discard(code)
-                changes.append((code, RESOLVE))
-        elif trigger_rule(counts, code):
-            active.add(code)
-            changes.append((code, TRIGGER))
-    return changes
-
-
-def print_step(line, counts, active, new_events):
-    print(f"  {line.strip()}")
-    print(f"      window: {dict(sorted(counts.items()))}  active: {sorted(active)}")
-    for event in new_events:
-        print(f"      -> {format_event(event)}")
-
-
-def detect_incidents(logs, trigger_rule=DEFAULT_TRIGGER_RULE, resolve_rule=None,
-                     window_seconds=WINDOW_SECONDS, debug=False):
-    """Return TRIGGER/RESOLVE events for (merchant_id, status_code) alerts.
-
-    `logs` is one string with a record per line, or a list of records. With
-    `debug`, each record's window counts, active alerts and events are printed.
-
-    An alert resolves when `resolve_rule` holds, by default when `trigger_rule`
-    no longer does. A merchant's alerts only change state when that merchant logs.
-    """
-    resolve_rule = resolve_rule or negate(trigger_rule)
-    windows = defaultdict(deque)
-    counts = defaultdict(lambda: defaultdict(int))
-    active = defaultdict(set)
+def detect_incidents(logs, debug=False):
+    windows = defaultdict(deque)                        # merchant_id -> records in the window
+    counts = defaultdict(lambda: defaultdict(int))      # merchant_id -> status_code -> count
+    active = defaultdict(set)                           # merchant_id -> status codes with an alert
     events = []
 
-    for line in split_logs(logs):
-        timestamp, merchant_id, status_code, count = parse_log(line)
-        add_to_window(windows[merchant_id], counts[merchant_id], timestamp, status_code, count,
-                      window_seconds)
-        changes = evaluate_alerts(counts[merchant_id], active[merchant_id], trigger_rule, resolve_rule)
-        new_events = [(timestamp, merchant_id, code, event_type) for code, event_type in changes]
+    for record in read_logs(logs):
+        timestamp, merchant_id, _, _ = record
+        add_to_window(windows[merchant_id], counts[merchant_id], record)
+        new_events = update_alerts(counts[merchant_id], active[merchant_id], timestamp, merchant_id)
         events.extend(new_events)
         if debug:
-            print_step(line, counts[merchant_id], active[merchant_id], new_events)
+            print_step(record, counts[merchant_id], active[merchant_id], new_events)
 
-    # Tuple order gives (timestamp, merchant_id, status_code, event_type) ascending; RESOLVE < TRIGGER.
+    # Sorts by timestamp, merchant_id, status_code, then event type (RESOLVE before TRIGGER).
     return [format_event(event) for event in sorted(events)]
 
 
@@ -169,13 +113,18 @@ SAMPLES = {
 }
 
 
-def run(logs, **options):
-    """Run detect_incidents with a step-by-step trace and return its output.
+def print_step(record, counts, active, new_events):
+    window = {code: n for code, n in sorted(counts.items()) if n}
+    print(f"  {record}")
+    print(f"      window: {window}  active: {sorted(active)}")
+    for event in new_events:
+        print(f"      -> {format_event(event)}")
 
-    `options` are passed through, e.g. run(logs, trigger_rule=volume_rule(3)).
-    """
+
+def run(logs):
+    """Trace detect_incidents record by record and return its output."""
     print("Steps:")
-    result = detect_incidents(logs, debug=True, **options)
+    result = detect_incidents(logs, debug=True)
     print("Output:")
     for event in result or ["(no events)"]:
         print(f"  {event}")
@@ -183,12 +132,11 @@ def run(logs, **options):
 
 
 def run_samples():
-    """Trace every sample and compare against its expected output."""
+    """Trace every sample and check it against its expected output."""
     all_passed = True
     for name, (logs, expected) in SAMPLES.items():
         print(f"===== {name} =====")
-        result = run(logs)
-        passed = result == expected
+        passed = run(logs) == expected
         all_passed = all_passed and passed
         print("PASS\n" if passed else f"FAIL, expected {expected}\n")
     return all_passed

@@ -4,8 +4,7 @@ from collections import defaultdict, deque
 from contextlib import redirect_stdout
 
 from incident_detection.detector import (
-    SAMPLES, add_to_window, all_of, any_of, detect_incidents, impact_rule, negate, parse_log, run,
-    run_samples, split_logs, volume_rule,
+    SAMPLES, add_to_window, detect_incidents, is_incident, read_logs, run, run_samples, update_alerts,
 )
 
 
@@ -26,10 +25,6 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("window: {200: 1, 500: 6}  active: [500]", out.getvalue())
         self.assertIn("-> 45,RESOLVE,merchant1,500", out.getvalue())
 
-    def test_run_passes_options_through(self):
-        with redirect_stdout(io.StringIO()):
-            self.assertEqual(run("0, m1,500,3", trigger_rule=volume_rule(3)), ["0,TRIGGER,m1,500"])
-
     def test_debug_off_prints_nothing(self):
         out = io.StringIO()
         with redirect_stdout(out):
@@ -41,66 +36,47 @@ class RunnerTest(unittest.TestCase):
             self.assertTrue(run_samples())
 
 
-class ParsingTest(unittest.TestCase):
-    def test_parses_comma_separated_record(self):
-        self.assertEqual(parse_log("12, m1,503,7"), (12, "m1", 503, 7))
-
-    def test_parses_space_separated_record(self):
-        self.assertEqual(parse_log("12 m1 503 7"), (12, "m1", 503, 7))
-
-    def test_splits_multiline_string_and_skips_blank_lines(self):
-        self.assertEqual(split_logs("\n  1, a,500,1\n\n2, b,200,3\n"), ["  1, a,500,1", "2, b,200,3"])
-
-    def test_accepts_list_of_records(self):
-        logs = ["10, merchant1,500,6", "16, merchant2,500,6"]
+class ReadingTest(unittest.TestCase):
+    def test_reads_comma_and_space_separated_lines_and_skips_blanks(self):
         self.assertEqual(
-            detect_incidents(logs),
-            ["10,TRIGGER,merchant1,500", "16,TRIGGER,merchant2,500"],
+            read_logs("\n  12, m1,503,7\n\n13 m2 200 1\n"),
+            [(12, "m1", 503, 7), (13, "m2", 200, 1)],
         )
+
+    def test_reads_list_of_lines(self):
+        self.assertEqual(read_logs(["10, merchant1,500,6"]), [(10, "merchant1", 500, 6)])
 
     def test_empty_input(self):
         self.assertEqual(detect_incidents(""), [])
 
 
-class WindowTest(unittest.TestCase):
+class ProcessingTest(unittest.TestCase):
     def test_keeps_records_at_t_minus_29_and_evicts_older(self):
         window, counts = deque(), defaultdict(int)
-        add_to_window(window, counts, 0, 500, 5)
-        add_to_window(window, counts, 29, 200, 1)
-        self.assertEqual(dict(counts), {500: 5, 200: 1})
-        add_to_window(window, counts, 30, 200, 1)
-        self.assertEqual(dict(counts), {200: 2})
+        add_to_window(window, counts, (0, "m1", 500, 5))
+        add_to_window(window, counts, (29, "m1", 200, 1))
+        self.assertEqual(counts[500], 5)
+        add_to_window(window, counts, (30, "m1", 200, 1))
+        self.assertEqual(counts[500], 0)
+        self.assertEqual(counts[200], 2)
+        self.assertEqual(list(window), [(29, "m1", 200, 1), (30, "m1", 200, 1)])
 
 
-def counts_with(failures, successes):
-    return {500: failures, 200: successes}
-
-
-class RuleTest(unittest.TestCase):
+class ResolutionTest(unittest.TestCase):
     def test_volume_threshold_is_inclusive(self):
-        self.assertFalse(volume_rule(5)(counts_with(4, 0), 500))
-        self.assertTrue(volume_rule(5)(counts_with(5, 0), 500))
+        self.assertFalse(is_incident({500: 4}, 500))
+        self.assertTrue(is_incident({500: 5}, 500))
 
     def test_impact_threshold_is_exclusive(self):
-        self.assertFalse(impact_rule(1)(counts_with(6, 600), 500))
-        self.assertTrue(impact_rule(1)(counts_with(6, 599), 500))
+        self.assertFalse(is_incident({500: 6, 200: 600}, 500))
+        self.assertTrue(is_incident({500: 6, 200: 599}, 500))
 
-    def test_no_successes_is_full_impact(self):
-        self.assertTrue(impact_rule(1)(counts_with(1, 0), 500))
-
-    def test_all_of_requires_both(self):
-        rule = all_of(volume_rule(5), impact_rule(1))
-        self.assertFalse(rule(counts_with(4, 0), 500))
-        self.assertFalse(rule(counts_with(6, 600), 500))
-        self.assertTrue(rule(counts_with(6, 599), 500))
-
-    def test_any_of_requires_either(self):
-        rule = any_of(volume_rule(100), impact_rule(1))
-        self.assertTrue(rule(counts_with(6, 0), 500))
-        self.assertFalse(rule(counts_with(6, 600), 500))
-
-    def test_negate(self):
-        self.assertTrue(negate(volume_rule(5))(counts_with(4, 0), 500))
+    def test_update_alerts_triggers_once_then_resolves(self):
+        active = set()
+        self.assertEqual(update_alerts({500: 5}, active, 1, "m1"), [(1, "m1", 500, "TRIGGER")])
+        self.assertEqual(update_alerts({500: 9}, active, 2, "m1"), [])
+        self.assertEqual(update_alerts({500: 0}, active, 3, "m1"), [(3, "m1", 500, "RESOLVE")])
+        self.assertEqual(active, set())
 
 
 class TriggerTest(unittest.TestCase):
@@ -185,28 +161,6 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual(
             detect_incidents(logs),
             ["0,TRIGGER,a,500", "0,TRIGGER,a,503", "0,TRIGGER,b,500"],
-        )
-
-
-class ConfigurationTest(unittest.TestCase):
-    def test_custom_trigger_rule(self):
-        self.assertEqual(
-            detect_incidents("0, m1,500,3", trigger_rule=volume_rule(3)),
-            ["0,TRIGGER,m1,500"],
-        )
-
-    def test_custom_window_size(self):
-        self.assertEqual(
-            detect_incidents("0, m1,500,5\n10, m1,200,1", window_seconds=10),
-            ["0,TRIGGER,m1,500", "10,RESOLVE,m1,500"],
-        )
-
-    def test_separate_resolve_rule(self):
-        # Hysteresis: trigger at 5 failures, only resolve once below 2.
-        logs = "0, m1,500,5\n30, m1,500,2\n40, m1,500,1\n60, m1,200,1"
-        self.assertEqual(
-            detect_incidents(logs, trigger_rule=volume_rule(5), resolve_rule=negate(volume_rule(2))),
-            ["0,TRIGGER,m1,500", "60,RESOLVE,m1,500"],
         )
 
 
