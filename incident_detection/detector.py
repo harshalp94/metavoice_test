@@ -3,7 +3,8 @@
 detect_incidents runs three steps for every log record:
     1. Reading              read_logs     -> (timestamp, merchant_id, status_code, count)
     2. Processing           add_to_window -> that merchant's status-code counts for the last 30s
-    3. Incident resolution  update_alerts -> TRIGGER / RESOLVE events for that merchant
+    3. Incident resolution  find_incidents -> error codes meeting the rule now
+                            alert_changes  -> TRIGGER new ones, RESOLVE ones no longer meeting it
 
 For manual debugging: python3 incident_detection/detector.py [file | -]
 """
@@ -43,26 +44,23 @@ def add_to_window(window, counts, record):
 
 # 3. Incident resolution
 
-def is_incident(counts, status_code):
+def is_incident(failures, successes):
     """At least MIN_FAILURES failures that are more than MIN_IMPACT_PERCENT% of the successes."""
-    failures = counts.get(status_code, 0)
-    return failures >= MIN_FAILURES and failures * 100 > counts.get(SUCCESS, 0) * MIN_IMPACT_PERCENT
+    return failures >= MIN_FAILURES and failures * 100 > successes * MIN_IMPACT_PERCENT
 
 
-def update_alerts(counts, active, timestamp, merchant_id):
-    """Trigger or resolve the merchant's alerts; return the new events."""
-    events = []
-    for status_code in counts:
-        if status_code == SUCCESS:
-            continue
-        incident = is_incident(counts, status_code)
-        if incident and status_code not in active:
-            active.add(status_code)
-            events.append((timestamp, merchant_id, status_code, "TRIGGER"))
-        elif not incident and status_code in active:
-            active.remove(status_code)
-            events.append((timestamp, merchant_id, status_code, "RESOLVE"))
-    return events
+def find_incidents(counts):
+    """Error codes in the merchant's window that currently meet the alert rule."""
+    successes = counts.get(SUCCESS, 0)
+    return {code for code, failures in counts.items()
+            if code != SUCCESS and is_incident(failures, successes)}
+
+
+def alert_changes(previous, current, timestamp, merchant_id):
+    """TRIGGER newly failing codes and RESOLVE recovered ones; ongoing alerts emit nothing."""
+    triggered = [(timestamp, merchant_id, code, "TRIGGER") for code in current - previous]
+    resolved = [(timestamp, merchant_id, code, "RESOLVE") for code in previous - current]
+    return triggered + resolved
 
 
 def format_event(event):
@@ -79,7 +77,9 @@ def detect_incidents(logs, debug=False):
     for record in read_logs(logs):
         timestamp, merchant_id, _, _ = record
         add_to_window(windows[merchant_id], counts[merchant_id], record)
-        new_events = update_alerts(counts[merchant_id], active[merchant_id], timestamp, merchant_id)
+        incidents = find_incidents(counts[merchant_id])
+        new_events = alert_changes(active[merchant_id], incidents, timestamp, merchant_id)
+        active[merchant_id] = incidents
         events.extend(new_events)
         if debug:
             print_step(record, counts[merchant_id], active[merchant_id], new_events)

@@ -4,7 +4,8 @@ from collections import defaultdict, deque
 from contextlib import redirect_stdout
 
 from incident_detection.detector import (
-    SAMPLES, add_to_window, detect_incidents, is_incident, read_logs, run, run_samples, update_alerts,
+    SAMPLES, add_to_window, alert_changes, detect_incidents, find_incidents, is_incident, read_logs,
+    run, run_samples,
 )
 
 
@@ -64,19 +65,25 @@ class ProcessingTest(unittest.TestCase):
 
 class ResolutionTest(unittest.TestCase):
     def test_volume_threshold_is_inclusive(self):
-        self.assertFalse(is_incident({500: 4}, 500))
-        self.assertTrue(is_incident({500: 5}, 500))
+        self.assertFalse(is_incident(4, 0))
+        self.assertTrue(is_incident(5, 0))
 
     def test_impact_threshold_is_exclusive(self):
-        self.assertFalse(is_incident({500: 6, 200: 600}, 500))
-        self.assertTrue(is_incident({500: 6, 200: 599}, 500))
+        self.assertFalse(is_incident(6, 600))
+        self.assertTrue(is_incident(6, 599))
 
-    def test_update_alerts_triggers_once_then_resolves(self):
-        active = set()
-        self.assertEqual(update_alerts({500: 5}, active, 1, "m1"), [(1, "m1", 500, "TRIGGER")])
-        self.assertEqual(update_alerts({500: 9}, active, 2, "m1"), [])
-        self.assertEqual(update_alerts({500: 0}, active, 3, "m1"), [(3, "m1", 500, "RESOLVE")])
-        self.assertEqual(active, set())
+    def test_find_incidents_checks_each_error_code_against_successes(self):
+        self.assertEqual(find_incidents({200: 100, 500: 5, 503: 1, 404: 0}), {500})
+        self.assertEqual(find_incidents({200: 1000, 500: 10}), set())
+
+    def test_alert_changes_triggers_new_and_resolves_recovered(self):
+        self.assertEqual(
+            alert_changes({500, 503}, {500, 404}, 7, "m1"),
+            [(7, "m1", 404, "TRIGGER"), (7, "m1", 503, "RESOLVE")],
+        )
+
+    def test_alert_changes_is_empty_while_alerts_continue(self):
+        self.assertEqual(alert_changes({500}, {500}, 7, "m1"), [])
 
 
 class TriggerTest(unittest.TestCase):
