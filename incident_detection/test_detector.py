@@ -47,6 +47,12 @@ class ReadingTest(unittest.TestCase):
     def test_reads_list_of_lines(self):
         self.assertEqual(read_logs(["10, merchant1,500,6"]), [(10, "merchant1", 500, 6)])
 
+    def test_reads_list_of_field_lists(self):
+        self.assertEqual(
+            read_logs([["10", " merchant1", "500", "6"], (11, "merchant1", 200, 1)]),
+            [(10, "merchant1", 500, 6), (11, "merchant1", 200, 1)],
+        )
+
     def test_empty_input(self):
         self.assertEqual(detect_incidents(""), [])
 
@@ -61,6 +67,13 @@ class ProcessingTest(unittest.TestCase):
         self.assertEqual(counts[500], 0)
         self.assertEqual(counts[200], 2)
         self.assertEqual(list(window), [(29, "m1", 200, 1), (30, "m1", 200, 1)])
+
+    def test_accepts_unconverted_string_records(self):
+        window, counts = deque(), defaultdict(int)
+        add_to_window(window, counts, "10, merchant1,500,2".split(","))
+        add_to_window(window, counts, "12 merchant1 500 3")
+        self.assertEqual(counts[500], 5)
+        self.assertEqual(list(window), [(10, "merchant1", 500, 2), (12, "merchant1", 500, 3)])
 
 
 class ResolutionTest(unittest.TestCase):

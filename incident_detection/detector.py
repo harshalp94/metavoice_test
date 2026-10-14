@@ -19,21 +19,27 @@ SUCCESS = 200
 
 # 1. Reading
 
+def to_record(entry):
+    """Convert "10, m1,500,2", ["10", "m1", "500", "2"] or (10, "m1", 500, 2) to (10, "m1", 500, 2)."""
+    fields = entry.replace(",", " ").split() if isinstance(entry, str) else entry
+    timestamp, merchant_id, status_code, count = fields
+    return int(timestamp), str(merchant_id).strip(), int(status_code), int(count)
+
+
 def read_logs(logs):
-    """Turn a multi-line string (or list of lines) into (timestamp, merchant_id, status_code, count) records."""
-    lines = logs.splitlines() if isinstance(logs, str) else logs
-    records = []
-    for line in lines:
-        if line.strip():
-            timestamp, merchant_id, status_code, count = line.replace(",", " ").split()
-            records.append((int(timestamp), merchant_id, int(status_code), int(count)))
-    return records
+    """Turn a multi-line string, or a list of lines / field lists, into typed records; skip blank lines."""
+    entries = logs.splitlines() if isinstance(logs, str) else logs
+    return [to_record(entry) for entry in entries if not isinstance(entry, str) or entry.strip()]
 
 
 # 2. Processing
 
 def add_to_window(window, counts, record):
-    """Add a record to its merchant's window and drop records outside [T-29, T]."""
+    """Add a record to its merchant's window and drop records outside [T-29, T].
+
+    `counts` is this merchant's status_code -> count dict, i.e. counts[merchant_id].
+    """
+    record = to_record(record)
     timestamp, _, status_code, count = record
     window.append(record)
     counts[status_code] += count
