@@ -1,46 +1,44 @@
+import io
 import unittest
 from collections import defaultdict, deque
+from contextlib import redirect_stdout
 
 from incident_detection.detector import (
-    add_to_window, all_of, any_of, detect_incidents, impact_rule, negate, parse_log, split_logs,
-    volume_rule,
+    SAMPLES, add_to_window, all_of, any_of, detect_incidents, impact_rule, negate, parse_log, run,
+    run_samples, split_logs, volume_rule,
 )
 
 
 class SampleTest(unittest.TestCase):
-    def test_part1_sample(self):
-        logs = """
-            10, merchant1,500,2
-            10, merchant2,500,1
-            15, merchant1,500,2
-            20, merchant1,500,1
-            20, merchant2,500,4
-        """
-        self.assertEqual(
-            detect_incidents(logs),
-            ["20,TRIGGER,merchant1,500", "20,TRIGGER,merchant2,500"],
-        )
+    def test_samples(self):
+        for name, (logs, expected) in SAMPLES.items():
+            with self.subTest(name):
+                self.assertEqual(detect_incidents(logs), expected)
 
-    def test_part2_sample(self):
-        logs = """
-            10, merchant1,200,600
-            12, merchant1,500,6
-            15, merchant2,200,599
-            16, merchant2,500,6
-        """
-        self.assertEqual(detect_incidents(logs), ["16,TRIGGER,merchant2,500"])
 
-    def test_part3_sample(self):
-        logs = """
-            10, merchant1,500,6
-            16, merchant2,500,6
-            45, merchant1,200,1
-            45, merchant2,200,1
-        """
-        self.assertEqual(
-            detect_incidents(logs),
-            ["10,TRIGGER,merchant1,500", "16,TRIGGER,merchant2,500", "45,RESOLVE,merchant1,500"],
-        )
+class RunnerTest(unittest.TestCase):
+    def test_run_traces_steps_and_returns_output(self):
+        logs, expected = SAMPLES["part3"]
+        out = io.StringIO()
+        with redirect_stdout(out):
+            result = run(logs)
+        self.assertEqual(result, expected)
+        self.assertIn("window: {200: 1, 500: 6}  active: [500]", out.getvalue())
+        self.assertIn("-> 45,RESOLVE,merchant1,500", out.getvalue())
+
+    def test_run_passes_options_through(self):
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(run("0, m1,500,3", trigger_rule=volume_rule(3)), ["0,TRIGGER,m1,500"])
+
+    def test_debug_off_prints_nothing(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            detect_incidents(SAMPLES["part1"][0])
+        self.assertEqual(out.getvalue(), "")
+
+    def test_run_samples_passes(self):
+        with redirect_stdout(io.StringIO()):
+            self.assertTrue(run_samples())
 
 
 class ParsingTest(unittest.TestCase):
