@@ -1,6 +1,7 @@
 from collections import defaultdict, deque
 
 WINDOW_SECONDS = 30
+ALERT_THRESHOLD = 5
 SUCCESS_STATUS = 200
 
 
@@ -10,19 +11,8 @@ def parse_log(line):
     return int(timestamp), merchant_id, int(status_code), int(count)
 
 
-def alert_condition(status_code, code_count, merchant_total):
-    """Whether an alert should be active for a (merchant_id, status_code) pair.
-
-    status_code: the error status code being evaluated.
-    code_count: occurrences of that status code for the merchant in the window.
-    merchant_total: all transactions (any status, including 200) for the merchant in the window.
-    """
-    raise NotImplementedError("Trigger/resolve criteria have not been specified yet")
-
-
-def detect_incidents(logs, condition=alert_condition):
+def detect_incidents(logs):
     window = deque()
-    merchant_totals = defaultdict(int)
     code_counts = defaultdict(lambda: defaultdict(int))
     active = defaultdict(set)
     events = []
@@ -30,14 +20,12 @@ def detect_incidents(logs, condition=alert_condition):
     for line in logs:
         timestamp, merchant_id, status_code, count = parse_log(line)
         window.append((timestamp, merchant_id, status_code, count))
-        merchant_totals[merchant_id] += count
         code_counts[merchant_id][status_code] += count
 
         # Window for timestamp T is [T-29, T]; any merchant losing entries must be re-evaluated.
         dirty = {merchant_id}
         while window[0][0] <= timestamp - WINDOW_SECONDS:
             _, old_merchant, old_code, old_count = window.popleft()
-            merchant_totals[old_merchant] -= old_count
             code_counts[old_merchant][old_code] -= old_count
             if code_counts[old_merchant][old_code] == 0:
                 del code_counts[old_merchant][old_code]
@@ -47,7 +35,7 @@ def detect_incidents(logs, condition=alert_condition):
             counts = code_counts[merchant]
             candidates = {code for code in counts if code != SUCCESS_STATUS} | active[merchant]
             for code in candidates:
-                met = condition(code, counts.get(code, 0), merchant_totals[merchant])
+                met = counts.get(code, 0) >= ALERT_THRESHOLD
                 if met and code not in active[merchant]:
                     active[merchant].add(code)
                     events.append((timestamp, merchant, code, "TRIGGER"))
