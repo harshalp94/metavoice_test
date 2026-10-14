@@ -1,11 +1,8 @@
 import unittest
 
-from incident_detection.detector import detect_incidents, parse_log
-
-
-class ParseLogTest(unittest.TestCase):
-    def test_parses_fields_and_strips_spaces(self):
-        self.assertEqual(parse_log("12, m1, 503, 7"), (12, "m1", 503, 7))
+from incident_detection.detector import IncidentDetector, detect_incidents
+from incident_detection.models import AlertEvent, EventType, LogEntry
+from incident_detection.rules import VolumeRule
 
 
 class SampleTest(unittest.TestCase):
@@ -123,6 +120,31 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual(
             detect_incidents(logs),
             ["0,TRIGGER,a,500", "0,TRIGGER,a,503", "0,TRIGGER,b,500"],
+        )
+
+
+class ConfigurationTest(unittest.TestCase):
+    def test_custom_trigger_rule(self):
+        detector = IncidentDetector(trigger_rule=VolumeRule(3))
+        self.assertEqual(detect_incidents(["0, m1, 500, 3"], detector), ["0,TRIGGER,m1,500"])
+
+    def test_custom_window_size(self):
+        detector = IncidentDetector(window_seconds=10)
+        logs = ["0, m1, 500, 5", "10, m1, 200, 1"]
+        self.assertEqual(detect_incidents(logs, detector), ["0,TRIGGER,m1,500", "10,RESOLVE,m1,500"])
+
+    def test_separate_resolve_rule(self):
+        # Hysteresis: trigger at 5 failures, only resolve once below 2.
+        detector = IncidentDetector(trigger_rule=VolumeRule(5), resolve_rule=~VolumeRule(2))
+        logs = ["0, m1, 500, 5", "30, m1, 500, 2", "40, m1, 500, 1", "60, m1, 200, 1"]
+        self.assertEqual(detect_incidents(logs, detector), ["0,TRIGGER,m1,500", "60,RESOLVE,m1,500"])
+
+    def test_detector_processes_entries_incrementally(self):
+        detector = IncidentDetector()
+        self.assertEqual(detector.process(LogEntry(0, "m1", 500, 4)), [])
+        self.assertEqual(
+            detector.process(LogEntry(1, "m1", 500, 1)),
+            [AlertEvent(1, "m1", 500, EventType.TRIGGER)],
         )
 
 

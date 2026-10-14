@@ -1,53 +1,48 @@
-from collections import defaultdict, deque
+from collections import defaultdict
+
+from incident_detection.models import AlertEvent, EventType, LogEntry
+from incident_detection.rules import ImpactRule, VolumeRule
+from incident_detection.window import MerchantWindow
 
 WINDOW_SECONDS = 30
-VOLUME_THRESHOLD = 5
-IMPACT_THRESHOLD_PERCENT = 1
-SUCCESS_STATUS = 200
+DEFAULT_TRIGGER_RULE = VolumeRule(5) & ImpactRule(1)
 
 
-def parse_log(line):
-    """Parse a "timestamp, merchant_id, status_code, count" record."""
-    timestamp, merchant_id, status_code, count = (part.strip() for part in line.split(','))
-    return int(timestamp), merchant_id, int(status_code), int(count)
+class IncidentDetector:
+    """Stateful alert tracker for a stream of log entries.
+
+    An alert per (merchant_id, status_code) triggers when `trigger_rule` holds and
+    resolves when `resolve_rule` holds (by default, when the trigger rule no longer
+    holds). A merchant's alerts only change state when that merchant logs.
+    """
+
+    def __init__(self, trigger_rule=DEFAULT_TRIGGER_RULE, resolve_rule=None,
+                 window_seconds=WINDOW_SECONDS):
+        self._trigger_rule = trigger_rule
+        self._resolve_rule = resolve_rule or ~trigger_rule
+        self._window_seconds = window_seconds
+        self._windows = {}
+        self._active = defaultdict(set)
+
+    def process(self, entry):
+        """Add a log entry and return the alert events it causes."""
+        window = self._windows.setdefault(entry.merchant_id, MerchantWindow(self._window_seconds))
+        window.add(entry)
+
+        active = self._active[entry.merchant_id]
+        events = []
+        for code in window.failure_codes() | active:
+            if code in active:
+                if self._resolve_rule.is_met(window, code):
+                    active.discard(code)
+                    events.append(AlertEvent(entry.timestamp, entry.merchant_id, code, EventType.RESOLVE))
+            elif self._trigger_rule.is_met(window, code):
+                active.add(code)
+                events.append(AlertEvent(entry.timestamp, entry.merchant_id, code, EventType.TRIGGER))
+        return events
 
 
-def alert_condition(failures, successes):
-    """At least 5 failures that are more than 1% of the successful volume."""
-    return failures >= VOLUME_THRESHOLD and failures * 100 > successes * IMPACT_THRESHOLD_PERCENT
-
-
-def detect_incidents(logs):
-    windows = defaultdict(deque)
-    code_counts = defaultdict(lambda: defaultdict(int))
-    active = defaultdict(set)
-    events = []
-
-    for line in logs:
-        timestamp, merchant_id, status_code, count = parse_log(line)
-        window = windows[merchant_id]
-        counts = code_counts[merchant_id]
-        window.append((timestamp, status_code, count))
-        counts[status_code] += count
-
-        # Window for timestamp T is [T-29, T].
-        while window[0][0] <= timestamp - WINDOW_SECONDS:
-            _, old_code, old_count = window.popleft()
-            counts[old_code] -= old_count
-            if counts[old_code] == 0:
-                del counts[old_code]
-
-        # Alerts only change state when their merchant logs.
-        successes = counts.get(SUCCESS_STATUS, 0)
-        candidates = {code for code in counts if code != SUCCESS_STATUS} | active[merchant_id]
-        for code in candidates:
-            met = alert_condition(counts.get(code, 0), successes)
-            if met and code not in active[merchant_id]:
-                active[merchant_id].add(code)
-                events.append((timestamp, merchant_id, code, "TRIGGER"))
-            elif not met and code in active[merchant_id]:
-                active[merchant_id].discard(code)
-                events.append((timestamp, merchant_id, code, "RESOLVE"))
-
-    events.sort()
-    return [f"{ts},{event},{merchant},{code}" for ts, merchant, code, event in events]
+def detect_incidents(logs, detector=None):
+    detector = detector or IncidentDetector()
+    events = [event for line in logs for event in detector.process(LogEntry.parse(line))]
+    return [str(event) for event in sorted(events)]
