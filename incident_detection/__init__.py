@@ -1,0 +1,1 @@
+from incident_detection.detector import detect_incidents
